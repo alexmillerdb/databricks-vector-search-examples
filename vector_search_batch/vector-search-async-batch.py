@@ -250,15 +250,19 @@ lookup_ids = source_df.select("uuid").limit(1000).toPandas()["uuid"].tolist()
 print(f"Prepared {len(query_texts)} queries for vector search.")
 
 # Run async batch search with controlled concurrency (e.g., 100)
-all_rows = await async_vector_search_batch(
-    queries=query_texts,
-    lookup_ids=lookup_ids,
-    index_name="users.alex_miller.spark_docs_vs_index",
-    columns=["filepath", "content", "category", "uuid"],
-    num_results=5,
-    query_type="HYBRID",
-    concurrency=100
-)
+async def run_async_batch():
+    return await async_vector_search_batch(
+        queries=query_texts,
+        lookup_ids=lookup_ids,
+        index_name="users.alex_miller.spark_docs_vs_index",
+        columns=["filepath", "content", "category", "uuid"],
+        num_results=5,
+        query_type="HYBRID",
+        concurrency=100
+    )
+
+# Execute the async function
+all_rows = asyncio.run(run_async_batch())
 
 # Create and display the Spark DataFrame
 sdf = spark.createDataFrame(all_rows)
