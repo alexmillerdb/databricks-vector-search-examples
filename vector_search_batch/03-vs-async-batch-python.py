@@ -462,7 +462,7 @@ async def run_async_batch():
         index_name=VECTOR_SEARCH_INDEX,
         columns=[ID_COLUMN, EMBEDDINGS_COLUMN, TEXT_COLUMN],
         num_results=5,
-        query_type="ANN",  # ANN=vector-only, HYBRID=text+vector, other=text-only
+        query_type="ANN",  # ANN=vector-only, HYBRID=text+vector
         concurrency=100
     )
 
@@ -518,11 +518,6 @@ display(sdf)
 # MAGIC - **Use Case**: Combines semantic text matching with vector similarity
 # MAGIC - **Configuration**: `query_type="HYBRID"`
 # MAGIC - **Result**: Best of both text and vector matching
-# MAGIC 
-# MAGIC #### **Text-Only Search**
-# MAGIC - **API Requirement**: Only `query_text` allowed, `query_vector` must be None
-# MAGIC - **Use Case**: Traditional text-based search
-# MAGIC - **Configuration**: Any query_type except "ANN", set `query_vector_list=None`
 # MAGIC 
 # MAGIC ### Current Configuration:
 # MAGIC - **Mode**: ANN (Vector-only)

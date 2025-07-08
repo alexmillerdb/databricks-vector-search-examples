@@ -2,7 +2,7 @@
 # MAGIC %md ## Ray Vector Search with Distributed Processing using Ray Data and Ray Core
 # MAGIC - Cluster config below but make sure to update `setup_ray_cluster` configurations to correct setting ([documentation](https://docs.databricks.com/aws/api/databricks-apps/ray/scale-ray))
 # MAGIC - Utilizes Ray Data and Ray Core to orchestrate the parallel processing
-# MAGIC - Supports **ANN (vector-only)**, **HYBRID (text+vector)**, and **text-only** search modes
+# MAGIC - Supports **ANN (vector-only)** and **HYBRID (text+vector)** search modes
 # MAGIC - Good for large datasets that don't fit into memory (why we use Ray Data)
 # MAGIC - Scales processing across multiple worker nodes
 # MAGIC - **Compatible with IMDB embeddings dataset from 02-create-vector-search-index.ipynb**
@@ -243,7 +243,7 @@ def ray_vector_search_batch(
 ):
     """
     Process Ray dataset in batches using Ray remote functions for vector search.
-    Supports ANN, HYBRID, and text-only search modes.
+    Supports ANN andHYBRID search modes.
     """
     def process_batch(batch):
         # Extract data from batch
@@ -318,7 +318,7 @@ TOKEN = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiTok
 INDEX_NAME = VECTOR_SEARCH_INDEX
 COLUMNS = [ID_COLUMN, EMBEDDINGS_COLUMN, TEXT_COLUMN]
 NUM_RESULTS = 5
-QUERY_TYPE = "ANN"  # Options: "ANN", "HYBRID", or any other value for text-only
+QUERY_TYPE = "ANN"  # Options: "ANN", "HYBRID"
 FILTERS_JSON = None  # Or your filter as a JSON string
 
 print("=== Configuration ===")
@@ -409,11 +409,6 @@ print("Ray cluster shutdown completed.")
 # MAGIC - **Use Case**: Combines semantic text matching with vector similarity
 # MAGIC - **Configuration**: `QUERY_TYPE = "HYBRID"`
 # MAGIC - **Result**: Best of both text and vector matching
-# MAGIC 
-# MAGIC #### **Text-Only Search**
-# MAGIC - **API Requirement**: Only `query_text` allowed, `query_vector` must be None
-# MAGIC - **Use Case**: Traditional text-based search
-# MAGIC - **Configuration**: `QUERY_TYPE = "TEXT"` (or any value except "ANN")
 # MAGIC 
 # MAGIC ### Ray Processing Benefits:
 # MAGIC - **Distributed Processing**: Utilizes multiple worker nodes for parallel processing
