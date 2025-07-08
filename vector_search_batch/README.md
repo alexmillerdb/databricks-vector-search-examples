@@ -10,6 +10,7 @@ This folder contains examples for performing batch vector search operations usin
 | `02-create-vector-search-index.ipynb` | Creates vector search index with embeddings | Index setup |
 | `03-vs-async-batch-python.py` | Python async batch processing | < 1M records, serverless CPU |
 | `03-vs-async-batch-ray.py` | Ray distributed batch processing | Large datasets, multi-node clusters |
+| `config.py` | **Configuration management system** | **Centralized settings for all notebooks** |
 | `old-02-vector-search-async-batch.ipynb` | Legacy version (deprecated) | Reference only |
 | `vector-search-async-batch.py` | Alternative implementation | Reference only |
 
@@ -23,26 +24,174 @@ This folder contains examples for performing batch vector search operations usin
 ### Basic Workflow
 1. **Data Preparation**: Run `01-download-dataset.ipynb` to download and prepare the IMDB dataset
 2. **Index Creation**: Run `02-create-vector-search-index.ipynb` to create the vector search index
-3. **Batch Processing**: Choose between Python async or Ray distributed processing
+3. **Configuration**: Set up your configuration using `config.py`
+4. **Batch Processing**: Choose between Python async or Ray distributed processing
 
-## 🔧 Configuration
+### Quick Start with Configuration
 
-### Common Settings
+#### Step 1: Choose Your Configuration Approach
 ```python
-# Unity Catalog Configuration
-UC_CATALOG = "users"
-UC_SCHEMA = "alex_miller"
-VS_INDEX_NAME = "vs_batch_example"
+# Option A: Use defaults (quickest start)
+from config import VectorSearchConfig
+config = VectorSearchConfig()
 
-# Vector Search Configuration
-VECTOR_SEARCH_ENDPOINT = "abs_test_temp"
-VECTOR_SEARCH_INDEX = f"{UC_CATALOG}.{UC_SCHEMA}.{VS_INDEX_NAME}"
-SOURCE_DATASET = f"{UC_CATALOG}.{UC_SCHEMA}.imdb_embeddings"
+# Option B: Use environment preset
+from config import ConfigPresets
+config = ConfigPresets.development()  # or staging, production
 
-# Column Configuration
-ID_COLUMN = "id"
-EMBEDDINGS_COLUMN = "embeddings"
-TEXT_COLUMN = "text"
+# Option C: Custom configuration
+from config import load_config
+config = load_config(
+    uc_catalog="your_catalog",
+    uc_schema="your_schema",
+    vs_index_name="your_index",
+    default_query_type="ANN"
+)
+```
+
+#### Step 2: Verify Configuration
+```python
+# Print all configuration settings
+config.print_config()
+
+# Check specific values
+print(f"Index: {config.vector_search_index}")
+print(f"Source: {config.source_dataset}")
+print(f"Query Type: {config.default_query_type}")
+```
+
+#### Step 3: Run Processing
+- **Python Async**: Open `03-vs-async-batch-python.py` and run with your config
+- **Ray Distributed**: Open `03-vs-async-batch-ray.py` and run with your config
+
+## 🔧 Configuration System
+
+Both notebooks now use a **centralized configuration system** via `config.py` that provides:
+- ✅ **Type-safe configuration** with dataclass validation
+- ✅ **Multiple configuration sources** (default, presets, environment variables, overrides)
+- ✅ **Environment-specific settings** (dev, staging, production)
+- ✅ **Easy customization** without editing core code
+
+### Configuration Options
+
+#### 1. **Default Configuration** (Quick Start)
+```python
+from config import VectorSearchConfig
+config = VectorSearchConfig()  # Uses default values
+```
+
+#### 2. **Preset Configurations** (Environment-Specific)
+```python
+from config import ConfigPresets
+
+# Development environment
+config = ConfigPresets.development()
+
+# Staging environment  
+config = ConfigPresets.staging()
+
+# Production environment
+config = ConfigPresets.production()
+
+# Testing environment
+config = ConfigPresets.testing()
+```
+
+#### 3. **Environment Variables** (CI/CD Friendly)
+```python
+from config import load_config
+
+# Load from environment variables
+config = load_config(use_env=True)
+```
+
+Set these environment variables:
+```bash
+export UC_CATALOG="prod"
+export UC_SCHEMA="vector_search"
+export VS_INDEX_NAME="prod_vs_index"
+export VECTOR_SEARCH_ENDPOINT="prod_vs_endpoint"
+export SOURCE_TABLE_NAME="prod_embeddings"
+export DEFAULT_QUERY_TYPE="HYBRID"
+export DEFAULT_CONCURRENCY="100"
+export MAX_SAMPLE_SIZE="10000"
+```
+
+#### 4. **Custom Overrides** (Flexible)
+```python
+from config import load_config
+
+# Custom configuration with overrides
+config = load_config(
+    default_query_type="ANN",
+    default_concurrency=50,
+    max_sample_size=500,
+    uc_catalog="my_catalog",
+    uc_schema="my_schema"
+)
+```
+
+#### 5. **Preset + Overrides** (Best of Both)
+```python
+from config import load_config
+
+# Load staging preset with custom overrides
+config = load_config(
+    preset="staging",
+    use_env=True,
+    default_concurrency=75,
+    max_sample_size=2000
+)
+```
+
+### Configuration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `uc_catalog` | `"users"` | Unity Catalog name |
+| `uc_schema` | `"alex_miller"` | Unity Catalog schema |
+| `vs_index_name` | `"vs_batch_example"` | Vector Search index name |
+| `vector_search_endpoint` | `"abs_test_temp"` | Vector Search endpoint |
+| `embedding_dimension` | `1024` | Vector embedding dimensions |
+| `source_table_name` | `"imdb_embeddings"` | Source table name |
+| `id_column` | `"id"` | ID column name |
+| `embeddings_column` | `"embeddings"` | Embeddings column name |
+| `text_column` | `"text"` | Text column name |
+| `default_num_results` | `5` | Default number of results |
+| `default_query_type` | `"HYBRID"` | Default query type |
+| `default_concurrency` | `100` | Default concurrency level |
+| `max_sample_size` | `1000` | Maximum sample size |
+| `max_retries` | `5` | Maximum retry attempts |
+| `backoff_factor` | `2.0` | Exponential backoff factor |
+| `request_timeout` | `30` | Request timeout (seconds) |
+
+### Environment-Specific Presets
+
+#### Development Preset
+```python
+config = ConfigPresets.development()
+# - Lower concurrency (20)
+# - Smaller sample size (100)
+# - Faster timeouts (15s)
+# - Fewer retries (3)
+```
+
+#### Staging Preset
+```python
+config = ConfigPresets.staging()
+# - Medium concurrency (50)
+# - Medium sample size (1000)
+# - Standard timeouts (30s)
+# - Standard retries (5)
+```
+
+#### Production Preset
+```python
+config = ConfigPresets.production()
+# - High concurrency (100)
+# - Large sample size (10000)
+# - Longer timeouts (60s)
+# - Standard retries (5)
 ```
 
 ## 🎯 Query Types
@@ -70,16 +219,29 @@ TEXT_COLUMN = "text"
 
 ### Usage Example
 ```python
-# Execute async batch processing
+# Import and configure
+from config import VectorSearchConfig, load_config
+
+# Option 1: Default configuration
+config = VectorSearchConfig()
+
+# Option 2: Custom configuration
+config = load_config(
+    default_query_type="ANN",
+    default_concurrency=50,
+    max_sample_size=500
+)
+
+# Execute async batch processing using config
 all_rows = await async_vector_search_batch(
     queries=query_texts,
     query_vector_list=query_vectors,
     lookup_ids=lookup_ids,
-    index_name=VECTOR_SEARCH_INDEX,
-    columns=[ID_COLUMN, EMBEDDINGS_COLUMN, TEXT_COLUMN],
-    num_results=5,
-    query_type="ANN",  # or "HYBRID"
-    concurrency=100
+    index_name=config.vector_search_index,
+    columns=config.get_column_list(),
+    num_results=config.default_num_results,
+    query_type=config.default_query_type,
+    concurrency=config.default_concurrency
 )
 ```
 
@@ -100,6 +262,19 @@ all_rows = await async_vector_search_batch(
 
 ### Usage Example
 ```python
+# Import and configure
+from config import ConfigPresets, load_config
+
+# Option 1: Use environment preset
+config = ConfigPresets.production()
+
+# Option 2: Custom configuration for large datasets
+config = load_config(
+    default_concurrency=100,
+    max_sample_size=5000,
+    default_query_type="ANN"
+)
+
 # Configure Ray cluster
 setup_ray_cluster(
     min_worker_nodes=1,
@@ -108,14 +283,14 @@ setup_ray_cluster(
     num_cpus_head_node=8
 )
 
-# Execute distributed batch processing
+# Execute distributed batch processing using config
 all_rows = ray_vector_search_batch(
     ray_ds=ray_ds,
     workspace_url=WORKSPACE_URL,
-    index_name=VECTOR_SEARCH_INDEX,
-    columns=[ID_COLUMN, EMBEDDINGS_COLUMN, TEXT_COLUMN],
-    num_results=5,
-    query_type="ANN",  # or "HYBRID"
+    index_name=config.vector_search_index,
+    columns=config.get_column_list(),
+    num_results=config.default_num_results,
+    query_type=config.default_query_type,
     batch_size=50
 )
 ```
@@ -195,17 +370,91 @@ Both approaches automatically handle:
 
 ### Movie Recommendation System
 ```python
-QUERY_TYPE = "HYBRID"  # Combine text and vector similarity
-NUM_RESULTS = 10       # Top 10 recommendations
+from config import load_config
+
+# Configure for movie recommendations
+config = load_config(
+    default_query_type="HYBRID",    # Combine text and vector similarity
+    default_num_results=10,         # Top 10 recommendations
+    default_concurrency=50,         # Moderate concurrency
+    max_sample_size=2000           # Process 2000 movies at once
+)
 ```
 
 ### Content Deduplication
 ```python
-QUERY_TYPE = "ANN"     # Pure vector similarity
-NUM_RESULTS = 5        # Find duplicates
+from config import load_config
+
+# Configure for deduplication
+config = load_config(
+    default_query_type="ANN",       # Pure vector similarity
+    default_num_results=5,          # Find top 5 duplicates
+    default_concurrency=100,        # High concurrency for speed
+    max_sample_size=10000          # Process large batches
+)
+```
+
+### Development Testing
+```python
+from config import ConfigPresets
+
+# Use development preset with custom overrides
+config = ConfigPresets.development()
+# Automatically sets:
+# - Lower concurrency (20)
+# - Smaller sample size (100)
+# - Faster timeouts (15s)
+# - Fewer retries (3)
+```
+
+### Production Deployment
+```python
+from config import load_config
+
+# Production configuration with environment variables
+config = load_config(
+    preset="production",
+    use_env=True,                   # Load from environment
+    default_concurrency=200,        # High concurrency
+    max_sample_size=50000          # Large batch processing
+)
 ```
 
 ## 🔍 Troubleshooting
+
+### Configuration Issues
+
+**Configuration not found**
+```python
+# Make sure config.py is in the same directory
+from config import VectorSearchConfig
+config = VectorSearchConfig()
+```
+
+**Environment variables not loading**
+```python
+# Check environment variables are set
+import os
+print(f"UC_CATALOG: {os.getenv('UC_CATALOG')}")
+
+# Use explicit environment loading
+from config import load_config
+config = load_config(use_env=True)
+```
+
+**Preset configuration not working**
+```python
+# Check available presets
+from config import ConfigPresets
+config = ConfigPresets.development()  # or staging, production, testing
+```
+
+**Configuration validation errors**
+```python
+# Check configuration parameters
+config = VectorSearchConfig()
+config.print_config()  # Print all settings
+```
 
 ### Common Issues
 
@@ -214,30 +463,56 @@ NUM_RESULTS = 5        # Find duplicates
 
 **Memory errors with large datasets**
 - Switch to Ray distributed approach
-- Reduce batch_size parameter
+- Reduce `config.max_sample_size` parameter
+- Use development preset: `ConfigPresets.development()`
 - Increase cluster memory allocation
 
 **API rate limiting (429 errors)**
-- Reduce concurrency parameter
-- Increase retry delays
+- Reduce `config.default_concurrency` parameter
+- Increase `config.backoff_factor` for longer retry delays
+- Use development preset for testing
 - Check Vector Search endpoint quotas
 
 **Vector dimension mismatches**
-- Verify EMBEDDING_DIMENSION matches your model
+- Verify `config.embedding_dimension` matches your model
 - Check vector format (list vs numpy array)
-- Validate source dataset schema
+- Validate source dataset schema with `config.print_config()`
+
+## 🎯 Configuration System Benefits
+
+### For Development Teams
+- **Consistent Settings**: Same configuration across all team members
+- **Environment Management**: Easy switching between dev/staging/prod
+- **Type Safety**: Compile-time validation of configuration parameters
+- **Documentation**: Self-documenting configuration with parameter descriptions
+
+### For Production Deployments
+- **CI/CD Integration**: Environment variable support for automated deployments
+- **Security**: Sensitive values can be managed through environment variables
+- **Monitoring**: Configuration validation ensures correct settings
+- **Rollback**: Easy configuration rollback with version control
+
+### For Experimentation
+- **Quick Testing**: Development preset for rapid prototyping
+- **Parameter Tuning**: Easy adjustment of concurrency, sample sizes, and timeouts
+- **A/B Testing**: Simple configuration switching for comparative testing
+- **Reproducibility**: Configuration files ensure reproducible experiments
 
 ## 📚 Additional Resources
 
 - [Databricks Vector Search Documentation](https://docs.databricks.com/machine-learning/vector-search.html)
 - [Ray Documentation](https://docs.ray.io/en/latest/)
 - [AsyncIO Best Practices](https://docs.python.org/3/library/asyncio.html)
+- [Python Dataclasses Documentation](https://docs.python.org/3/library/dataclasses.html)
 
 ## 🤝 Contributing
 
 When adding new examples:
 1. Follow the existing naming convention
-2. Include comprehensive documentation
-3. Add performance benchmarks
-4. Test with different query types
-5. Update this README with new capabilities 
+2. **Use the config system** for all parameterized variables
+3. Include comprehensive documentation
+4. Add performance benchmarks
+5. Test with different query types and configurations
+6. Update this README with new capabilities
+7. Add new configuration parameters to `config.py` if needed
+8. Test with all configuration presets (development, staging, production) 

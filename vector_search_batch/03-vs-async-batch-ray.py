@@ -36,26 +36,36 @@ ray.init(ignore_reinit_error=True)
 
 import ray.data
 
-# UC CATALOG, SCHEMA, INDEX (matching 02-create-vector-search-index.ipynb)
-UC_CATALOG = "users"
-UC_SCHEMA = "alex_miller"
-VS_INDEX_NAME = "vs_batch_example"
+# Import configuration
+from config import VectorSearchConfig, ConfigPresets, load_config
 
-# VS Endpoint Name
-VECTOR_SEARCH_ENDPOINT = "abs_test_temp"
-# Index-Name
-VECTOR_SEARCH_INDEX = f"{UC_CATALOG}.{UC_SCHEMA}.{VS_INDEX_NAME}"
+# Initialize configuration (choose one approach):
+# Option 1: Use default configuration
+# config = VectorSearchConfig()
 
-# Embedding Dimensions
-EMBEDDING_DIMENSION = 1024
+# Option 2: Use a preset (uncomment to use)
+# config = ConfigPresets.development()
 
-# Text Dataset having embeddings (matching the source table from index creation)
-SOURCE_DATASET = f"{UC_CATALOG}.{UC_SCHEMA}.imdb_embeddings"
+# Option 3: Load from environment variables (uncomment to use)
+# config = load_config(use_env=True)
 
-# ID and Content Columns
-ID_COLUMN = "id"
-EMBEDDINGS_COLUMN = "embeddings"
-TEXT_COLUMN = "text"
+# Option 4: Use custom overrides (uncomment to use)
+config = load_config(default_concurrency=100, max_sample_size=5000)
+
+# Print configuration
+config.print_config()
+
+# Set variables for backward compatibility
+UC_CATALOG = config.uc_catalog
+UC_SCHEMA = config.uc_schema
+VS_INDEX_NAME = config.vs_index_name
+VECTOR_SEARCH_ENDPOINT = config.vector_search_endpoint
+VECTOR_SEARCH_INDEX = config.vector_search_index
+EMBEDDING_DIMENSION = config.embedding_dimension
+SOURCE_DATASET = config.source_dataset
+ID_COLUMN = config.id_column
+EMBEDDINGS_COLUMN = config.embeddings_column
+TEXT_COLUMN = config.text_column
 
 # UC Volume for Ray processing
 VOLUME_NAME = "ray"
@@ -63,7 +73,7 @@ spark.sql(f"CREATE VOLUME IF NOT EXISTS {UC_CATALOG}.{UC_SCHEMA}.{VOLUME_NAME}")
 UC_VOLUME_FOR_RAY = f"/Volumes/{UC_CATALOG}/{UC_SCHEMA}/{VOLUME_NAME}/temp"
 
 # Convert a Spark DataFrame to a Ray Dataset
-spark_df = spark.read.table(SOURCE_DATASET).select([ID_COLUMN, EMBEDDINGS_COLUMN, TEXT_COLUMN]).limit(1000)
+spark_df = spark.read.table(SOURCE_DATASET).select([ID_COLUMN, EMBEDDINGS_COLUMN, TEXT_COLUMN]).limit(config.max_sample_size)
 ray_ds = ray.data.from_spark(spark_df)
 
 # COMMAND ----------
@@ -179,9 +189,9 @@ def vector_search_task(query_text, query_vector, workspace_url, index_name, toke
     url = f"{workspace_url}/api/2.0/vector-search/indexes/{index_name}/query"
     
     # Retry logic with exponential backoff
-    for attempt in range(1, 6):
+    for attempt in range(1, config.max_retries + 1):
         try:
-            with httpx.Client(timeout=30) as client:
+            with httpx.Client(timeout=config.request_timeout) as client:
                 response = client.post(url, headers=headers, json=payload)
             if response.status_code == 200:
                 data = response.json()
@@ -195,7 +205,7 @@ def vector_search_task(query_text, query_vector, workspace_url, index_name, toke
                 return rows
             elif response.status_code == 429 or response.status_code >= 500:
                 import time
-                wait = 2 ** attempt
+                wait = config.backoff_factor ** attempt
                 print(f"Retrying in {wait} seconds due to status {response.status_code}...")
                 time.sleep(wait)
             else:
@@ -204,7 +214,7 @@ def vector_search_task(query_text, query_vector, workspace_url, index_name, toke
         except Exception as e:
             import time
             print(f"Request error: {e}, retrying...")
-            time.sleep(2 ** attempt)
+            time.sleep(config.backoff_factor ** attempt)
     return []
 
 def flatten_results(results, columns, lookup_texts, lookup_vectors, lookup_ids):
@@ -315,10 +325,10 @@ def ray_vector_search_batch(
 # Configuration
 WORKSPACE_URL = dbutils.entry_point.getDbutils().notebook().getContext().apiUrl().get()
 TOKEN = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
-INDEX_NAME = VECTOR_SEARCH_INDEX
-COLUMNS = [ID_COLUMN, EMBEDDINGS_COLUMN, TEXT_COLUMN]
-NUM_RESULTS = 5
-QUERY_TYPE = "ANN"  # Options: "ANN", "HYBRID"
+INDEX_NAME = config.vector_search_index
+COLUMNS = config.get_column_list()
+NUM_RESULTS = config.default_num_results
+QUERY_TYPE = config.default_query_type
 FILTERS_JSON = None  # Or your filter as a JSON string
 
 print("=== Configuration ===")
@@ -357,11 +367,11 @@ os.environ['RAY_UC_VOLUMES_FUSE_TEMP_DIR'] = UC_VOLUME_FOR_RAY
 # Write to Delta table
 _ = ray.data.Dataset.write_databricks_table(
   ray_dataset=all_rows,
-  name=f"{UC_CATALOG}.{UC_SCHEMA}.imdb_vs_ray_results",
+  name=f"{config.uc_catalog}.{config.uc_schema}.imdb_vs_ray_results",
   mode="overwrite"    # or append
 )
 
-print(f"Results written to Delta table: {UC_CATALOG}.{UC_SCHEMA}.imdb_vs_ray_results")
+print(f"Results written to Delta table: {config.uc_catalog}.{config.uc_schema}.imdb_vs_ray_results")
 
 # COMMAND ----------
 
@@ -370,7 +380,7 @@ print(f"Results written to Delta table: {UC_CATALOG}.{UC_SCHEMA}.imdb_vs_ray_res
 # COMMAND ----------
 
 # Read and display the results as a Spark DataFrame
-sdf = spark.read.table(f"{UC_CATALOG}.{UC_SCHEMA}.imdb_vs_ray_results")
+sdf = spark.read.table(f"{config.uc_catalog}.{config.uc_schema}.imdb_vs_ray_results")
 print(f"Spark DataFrame created with {sdf.count()} rows.")
 display(sdf)
 
@@ -390,39 +400,63 @@ print("Ray cluster shutdown completed.")
 
 # MAGIC %md ### Configuration Summary and Usage Guide
 # MAGIC 
-# MAGIC This notebook has been updated to work with:
-# MAGIC - **Vector Search Index**: `users.alex_miller.vs_batch_example`
-# MAGIC - **Source Dataset**: `users.alex_miller.imdb_embeddings`
-# MAGIC - **Endpoint**: `abs_test_temp`
-# MAGIC - **Expected Columns**: `id`, `embeddings`, `text`
+# MAGIC This notebook uses a **config-based approach** with the following features:
+# MAGIC - **Configuration File**: `config.py` with dataclass-based settings
+# MAGIC - **Multiple Configuration Options**: Default, presets, environment variables, and custom overrides
+# MAGIC - **Dynamic Configuration**: All settings are loaded from the config object
+# MAGIC - **Ray Integration**: Distributed processing with configurable parameters
 # MAGIC 
-# MAGIC ### Query Type Options & API Behavior:
+# MAGIC ### Configuration Options:
 # MAGIC 
-# MAGIC #### **ANN (Vector-Only Search)**
-# MAGIC - **API Requirement**: Only `query_vector` allowed, `query_text` must be None
-# MAGIC - **Use Case**: Pure vector similarity search
-# MAGIC - **Configuration**: `QUERY_TYPE = "ANN"`
-# MAGIC - **Result**: Finds vectors most similar to your query vector
+# MAGIC #### **Default Configuration**
+# MAGIC ```python
+# MAGIC config = VectorSearchConfig()  # Uses default values
+# MAGIC ```
 # MAGIC 
-# MAGIC #### **HYBRID (Text + Vector Search)**  
-# MAGIC - **API Requirement**: Both `query_text` and `query_vector` allowed
-# MAGIC - **Use Case**: Combines semantic text matching with vector similarity
-# MAGIC - **Configuration**: `QUERY_TYPE = "HYBRID"`
-# MAGIC - **Result**: Best of both text and vector matching
+# MAGIC #### **Preset Configurations**
+# MAGIC ```python
+# MAGIC config = ConfigPresets.development()  # Dev environment
+# MAGIC config = ConfigPresets.staging()      # Staging environment
+# MAGIC config = ConfigPresets.production()   # Production environment
+# MAGIC ```
+# MAGIC 
+# MAGIC #### **Environment Variables**
+# MAGIC ```python
+# MAGIC config = load_config(use_env=True)    # Load from environment
+# MAGIC ```
+# MAGIC 
+# MAGIC #### **Custom Overrides**
+# MAGIC ```python
+# MAGIC config = load_config(
+# MAGIC     default_query_type="ANN",
+# MAGIC     default_concurrency=50,
+# MAGIC     max_sample_size=500
+# MAGIC )
+# MAGIC ```
+# MAGIC 
+# MAGIC ### Current Configuration:
+# MAGIC The configuration is printed above and includes:
+# MAGIC - **UC Catalog/Schema**: Configurable Unity Catalog location
+# MAGIC - **Vector Search Index**: Configurable index name and endpoint
+# MAGIC - **Source Dataset**: Configurable source table with column mapping
+# MAGIC - **Search Parameters**: Configurable query type, results, and retry settings
+# MAGIC - **Ray Settings**: Configurable batch size and processing parameters
 # MAGIC 
 # MAGIC ### Ray Processing Benefits:
 # MAGIC - **Distributed Processing**: Utilizes multiple worker nodes for parallel processing
 # MAGIC - **Memory Efficient**: Processes data in batches without loading everything into memory
 # MAGIC - **Scalable**: Automatically scales across your Spark cluster
 # MAGIC - **Fault Tolerant**: Ray handles task failures and retries automatically
+# MAGIC - **Config-Driven**: All parameters controlled via configuration
 # MAGIC 
 # MAGIC ### Performance Considerations:
 # MAGIC - Adjust `batch_size` based on your cluster resources and memory constraints
 # MAGIC - Increase `max_worker_nodes` for faster processing of large datasets
 # MAGIC - Monitor resource usage and adjust CPU allocation as needed
+# MAGIC - Use `config.max_sample_size` to control data size for processing
 # MAGIC 
-# MAGIC ### Vector Format Notes:
-# MAGIC - Vectors are automatically converted to list format for API compatibility
-# MAGIC - Supports both numpy arrays and list formats as input
-# MAGIC - Handles None/empty values for both text and vector queries
-# MAGIC - Distributed processing maintains data integrity across worker nodes 
+# MAGIC ### To Change Configuration:
+# MAGIC 1. **Edit config.py**: Modify default values in the dataclass
+# MAGIC 2. **Use Environment Variables**: Set UC_CATALOG, UC_SCHEMA, etc.
+# MAGIC 3. **Use Presets**: Uncomment preset configuration lines
+# MAGIC 4. **Override Values**: Pass custom values to load_config() 

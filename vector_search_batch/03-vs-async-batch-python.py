@@ -21,26 +21,36 @@
 
 # COMMAND ----------
 
-# UC CATALOG, SCHEMA, INDEX (matching 02-create-vector-search-index.ipynb)
-UC_CATALOG = "users"
-UC_SCHEMA = "alex_miller"
-VS_INDEX_NAME = "vs_batch_example"
+# Import configuration
+from config import VectorSearchConfig, ConfigPresets, load_config
 
-# VS Endpoint Name
-VECTOR_SEARCH_ENDPOINT = "abs_test_temp"
-# Index-Name
-VECTOR_SEARCH_INDEX = f"{UC_CATALOG}.{UC_SCHEMA}.{VS_INDEX_NAME}"
+# Initialize configuration (choose one approach):
+# Option 1: Use default configuration
+# config = VectorSearchConfig()
 
-# Embedding Dimensions
-EMBEDDING_DIMENSION = 1024
+# Option 2: Use a preset (uncomment to use)
+# config = ConfigPresets.development()
 
-# Text Dataset having embeddings (matching the source table from index creation)
-SOURCE_DATASET = f"{UC_CATALOG}.{UC_SCHEMA}.imdb_embeddings"
+# Option 3: Load from environment variables (uncomment to use)
+# config = load_config(use_env=True)
 
-# ID and Content Columns
-ID_COLUMN = "id"
-EMBEDDINGS_COLUMN = "embeddings"
-TEXT_COLUMN = "text"    # Or None if you don't want to include the text column
+# Option 4: Use custom overrides (uncomment to use)
+config = load_config(default_concurrency=100, max_sample_size=5000)
+
+# Print configuration
+config.print_config()
+
+# Set variables for backward compatibility
+UC_CATALOG = config.uc_catalog
+UC_SCHEMA = config.uc_schema
+VS_INDEX_NAME = config.vs_index_name
+VECTOR_SEARCH_ENDPOINT = config.vector_search_endpoint
+VECTOR_SEARCH_INDEX = config.vector_search_index
+EMBEDDING_DIMENSION = config.embedding_dimension
+SOURCE_DATASET = config.source_dataset
+ID_COLUMN = config.id_column
+EMBEDDINGS_COLUMN = config.embeddings_column
+TEXT_COLUMN = config.text_column
 
 source_df = spark.table(SOURCE_DATASET)
 
@@ -237,9 +247,13 @@ def build_payload(
 
 async def query_vector_search(
     client, workspace_url, index_name, headers, payload,
-    max_retries=5, backoff_factor=2
+    max_retries=None, backoff_factor=None
 ):
     """Async API call with retry logic for transient errors."""
+    # Use config defaults if not specified
+    max_retries = max_retries or config.max_retries
+    backoff_factor = backoff_factor or config.backoff_factor
+    
     url = f"{workspace_url}/api/2.0/vector-search/indexes/{index_name}/query"
     for attempt in range(1, max_retries + 1):
         try:
@@ -349,7 +363,7 @@ async def async_vector_search_batch(
                     print(f"Request {idx} query_text length: {len(payload['query_text'])}")
                 print(f"Request {idx} columns: {payload.get('columns', [])}")
             
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=config.request_timeout) as client:
                 response = await query_vector_search(client, workspace_url, index_name, headers, payload)
             parsed_results = parse_response(response, fields=columns + ["score"])
             # Attach lookup_content and lookup_id if provided
@@ -401,22 +415,22 @@ async def async_vector_search_batch(
 
 # COMMAND ----------
 
-# Extract query vectors and text from the DataFrame
-query_data_df = source_df.select(EMBEDDINGS_COLUMN, TEXT_COLUMN, ID_COLUMN).limit(1000).toPandas()
+# Extract query vectors and text from the DataFrame using config
+query_data_df = source_df.select(config.embeddings_column, config.text_column, config.id_column).limit(config.max_sample_size).toPandas()
 
 # Prepare vectors (convert to list format)
 query_vectors = []
-for vec in query_data_df[EMBEDDINGS_COLUMN]:
+for vec in query_data_df[config.embeddings_column]:
     if vec is not None:
         query_vectors.append(vec.tolist() if hasattr(vec, 'tolist') else list(vec))
     else:
         query_vectors.append(None)
 
 # Prepare text queries
-query_texts = query_data_df[TEXT_COLUMN].tolist()
+query_texts = query_data_df[config.text_column].tolist()
 
 # Prepare lookup IDs
-lookup_ids = query_data_df[ID_COLUMN].tolist()
+lookup_ids = query_data_df[config.id_column].tolist()
 
 print(f"Prepared {len(query_vectors)} vector queries and {len(query_texts)} text queries for vector search.")
 
@@ -459,11 +473,11 @@ async def run_async_batch():
         queries=query_texts,  # Text queries (used for HYBRID, ignored for ANN)
         query_vector_list=query_vectors,  # Vectors (used for both HYBRID and ANN)
         lookup_ids=lookup_ids,
-        index_name=VECTOR_SEARCH_INDEX,
-        columns=[ID_COLUMN, EMBEDDINGS_COLUMN, TEXT_COLUMN],
-        num_results=5,
-        query_type="ANN",  # ANN=vector-only, HYBRID=text+vector
-        concurrency=100
+        index_name=config.vector_search_index,
+        columns=config.get_column_list(),
+        num_results=config.default_num_results,
+        query_type=config.default_query_type,
+        concurrency=config.default_concurrency
     )
 
 # Execute the async function
@@ -488,38 +502,49 @@ display(sdf)
 
 # MAGIC %md ### Configuration Summary
 # MAGIC 
-# MAGIC This notebook has been configured to work with:
-# MAGIC - **Vector Search Index**: `users.alex_miller.vs_batch_example`
-# MAGIC - **Source Dataset**: `users.alex_miller.imdb_embeddings`
-# MAGIC - **Endpoint**: `abs_test_temp`
-# MAGIC - **Expected Columns**: `id`, `embeddings`, `text`
-# MAGIC - **Search Type**: Vector-based search (ANN) using embeddings
+# MAGIC This notebook uses a **config-based approach** with the following features:
+# MAGIC - **Configuration File**: `config.py` with dataclass-based settings
+# MAGIC - **Multiple Configuration Options**: Default, presets, environment variables, and custom overrides
+# MAGIC - **Dynamic Configuration**: All settings are loaded from the config object
 # MAGIC 
-# MAGIC If your dataset has different column names, update the column references in:
-# MAGIC 1. The configuration section (`ID_COLUMN`, `EMBEDDINGS_COLUMN`)
-# MAGIC 2. The DataFrame selection operations (`.select(EMBEDDINGS_COLUMN, ID_COLUMN)`)
-# MAGIC 3. The async function calls (`columns=[ID_COLUMN, EMBEDDINGS_COLUMN, TEXT_COLUMN]`)
+# MAGIC ### Configuration Options:
 # MAGIC 
-# MAGIC ### Vector Format Notes:
-# MAGIC - Vectors are automatically converted to list format for API compatibility
-# MAGIC - Supports both numpy arrays and list formats as input
-# MAGIC - Handles None/empty values for both text and vector queries
+# MAGIC #### **Default Configuration**
+# MAGIC ```python
+# MAGIC config = VectorSearchConfig()  # Uses default values
+# MAGIC ```
 # MAGIC 
-# MAGIC ### Query Type Options & API Behavior:
+# MAGIC #### **Preset Configurations**
+# MAGIC ```python
+# MAGIC config = ConfigPresets.development()  # Dev environment
+# MAGIC config = ConfigPresets.staging()      # Staging environment
+# MAGIC config = ConfigPresets.production()   # Production environment
+# MAGIC ```
 # MAGIC 
-# MAGIC #### **ANN (Vector-Only Search)**
-# MAGIC - **API Requirement**: Only `query_vector` allowed, `query_text` must be None
-# MAGIC - **Use Case**: Pure vector similarity search
-# MAGIC - **Configuration**: `query_type="ANN"`
-# MAGIC - **Result**: Finds vectors most similar to your query vector
+# MAGIC #### **Environment Variables**
+# MAGIC ```python
+# MAGIC config = load_config(use_env=True)    # Load from environment
+# MAGIC ```
 # MAGIC 
-# MAGIC #### **HYBRID (Text + Vector Search)**  
-# MAGIC - **API Requirement**: Both `query_text` and `query_vector` allowed
-# MAGIC - **Use Case**: Combines semantic text matching with vector similarity
-# MAGIC - **Configuration**: `query_type="HYBRID"`
-# MAGIC - **Result**: Best of both text and vector matching
+# MAGIC #### **Custom Overrides**
+# MAGIC ```python
+# MAGIC config = load_config(
+# MAGIC     default_query_type="ANN",
+# MAGIC     default_concurrency=50,
+# MAGIC     max_sample_size=500
+# MAGIC )
+# MAGIC ```
 # MAGIC 
 # MAGIC ### Current Configuration:
-# MAGIC - **Mode**: ANN (Vector-only)
-# MAGIC - **Behavior**: Uses only embeddings for search, ignores text queries
-# MAGIC - **API Calls**: Include only `query_vector`, `query_text` is explicitly set to None 
+# MAGIC The configuration is printed above and includes:
+# MAGIC - **UC Catalog/Schema**: Configurable Unity Catalog location
+# MAGIC - **Vector Search Index**: Configurable index name and endpoint
+# MAGIC - **Source Dataset**: Configurable source table with column mapping
+# MAGIC - **Search Parameters**: Configurable query type, concurrency, and result limits
+# MAGIC - **Retry Settings**: Configurable retry logic and timeouts
+# MAGIC 
+# MAGIC ### To Change Configuration:
+# MAGIC 1. **Edit config.py**: Modify default values in the dataclass
+# MAGIC 2. **Use Environment Variables**: Set UC_CATALOG, UC_SCHEMA, etc.
+# MAGIC 3. **Use Presets**: Uncomment preset configuration lines
+# MAGIC 4. **Override Values**: Pass custom values to load_config() 
