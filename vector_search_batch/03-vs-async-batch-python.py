@@ -35,7 +35,7 @@ from config import VectorSearchConfig, ConfigPresets, load_config
 # config = load_config(use_env=True)
 
 # Option 4: Use custom overrides (uncomment to use)
-config = load_config(default_concurrency=100, max_sample_size=5000)
+config = load_config(default_concurrency=100, max_sample_size=5000, vector_search_endpoint="storage_optimized_test")
 
 # Print configuration
 config.print_config()
